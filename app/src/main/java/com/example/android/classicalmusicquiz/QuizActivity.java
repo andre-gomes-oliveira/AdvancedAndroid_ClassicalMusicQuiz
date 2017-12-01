@@ -16,16 +16,21 @@
 
 package com.example.android.classicalmusicquiz;
 
+import android.app.Notification;
+import android.app.NotificationManager;
+import android.app.PendingIntent;
 import android.content.Intent;
 import android.graphics.BitmapFactory;
 import android.graphics.Color;
 import android.graphics.PorterDuff;
+import android.media.session.MediaSession;
+import android.media.session.PlaybackState;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.Handler;
+import android.support.v4.app.NotificationCompat;
 import android.support.v4.content.ContextCompat;
-import android.support.v4.media.session.MediaSessionCompat;
-import android.support.v4.media.session.PlaybackStateCompat;
+import android.support.v4.media.session.MediaButtonReceiver;
 import android.support.v7.app.AppCompatActivity;
 import android.view.View;
 import android.widget.Button;
@@ -36,6 +41,7 @@ import com.google.android.exoplayer2.ExoPlaybackException;
 import com.google.android.exoplayer2.ExoPlayer;
 import com.google.android.exoplayer2.ExoPlayerFactory;
 import com.google.android.exoplayer2.LoadControl;
+import com.google.android.exoplayer2.PlaybackParameters;
 import com.google.android.exoplayer2.SimpleExoPlayer;
 import com.google.android.exoplayer2.Timeline;
 import com.google.android.exoplayer2.extractor.DefaultExtractorsFactory;
@@ -48,6 +54,7 @@ import com.google.android.exoplayer2.trackselection.TrackSelector;
 import com.google.android.exoplayer2.ui.SimpleExoPlayerView;
 import com.google.android.exoplayer2.upstream.DefaultDataSourceFactory;
 import com.google.android.exoplayer2.util.Util;
+
 
 import java.util.ArrayList;
 
@@ -65,8 +72,9 @@ public class QuizActivity extends AppCompatActivity implements View.OnClickListe
     private Button[] mButtons;
     private SimpleExoPlayer mExoPlayer;
     private SimpleExoPlayerView mPlayerView;
-    private MediaSessionCompat mMediaSession;
-    private PlaybackStateCompat.Builder mStateBuilder;
+    private MediaSession mMediaSession;
+    private PlaybackState.Builder mStateBuilder;
+    private NotificationManager mNotificationManager;
 
 
     @Override
@@ -133,23 +141,23 @@ public class QuizActivity extends AppCompatActivity implements View.OnClickListe
     private void initializeMediaSession() {
 
         // Create a MediaSessionCompat.
-        mMediaSession = new MediaSessionCompat(this, TAG);
+        mMediaSession = new MediaSession(this, TAG);
 
         // Enable callbacks from MediaButtons and TransportControls.
         mMediaSession.setFlags(
-                MediaSessionCompat.FLAG_HANDLES_MEDIA_BUTTONS |
-                        MediaSessionCompat.FLAG_HANDLES_TRANSPORT_CONTROLS);
+                MediaSession.FLAG_HANDLES_MEDIA_BUTTONS |
+                        MediaSession.FLAG_HANDLES_TRANSPORT_CONTROLS);
 
         // Do not let MediaButtons restart the player when the app is not visible.
         mMediaSession.setMediaButtonReceiver(null);
 
         // Set an initial PlaybackState with ACTION_PLAY, so media buttons can start the player.
-        mStateBuilder = new PlaybackStateCompat.Builder()
+        mStateBuilder = new PlaybackState.Builder()
                 .setActions(
-                        PlaybackStateCompat.ACTION_PLAY |
-                                PlaybackStateCompat.ACTION_PAUSE |
-                                PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS |
-                                PlaybackStateCompat.ACTION_PLAY_PAUSE);
+                        PlaybackState.ACTION_PLAY |
+                                PlaybackState.ACTION_PAUSE |
+                                PlaybackState.ACTION_SKIP_TO_PREVIOUS |
+                                PlaybackState.ACTION_PLAY_PAUSE);
 
         mMediaSession.setPlaybackState(mStateBuilder.build());
 
@@ -184,7 +192,48 @@ public class QuizActivity extends AppCompatActivity implements View.OnClickListe
     }
 
 
-    // TODO (1): Create a method that shows a MediaStyle notification with two actions (play/pause, skip to previous). Clicking on the notification should launch this activity. It should take one argument that defines the state of MediaSession.
+    // COMPLETED (1): Create a method that shows a MediaStyle notification with two actions (play/pause, skip to previous).
+    // Clicking on the notification should launch this activity. It should take one argument that defines the state of MediaSession.
+    private void showNotification(PlaybackState state){
+
+        int icon;
+        String play_pause;
+        if(state.getState() == PlaybackState.STATE_PLAYING){
+            icon = R.drawable.exo_controls_pause;
+            play_pause = getString(R.string.pause);
+        } else {
+            icon = R.drawable.exo_controls_play;
+            play_pause = getString(R.string.play);
+        }
+
+        Notification.Action playPauseAction = new Notification.Action(
+                icon, play_pause,
+                MediaButtonReceiver.buildMediaButtonPendingIntent(this,
+                        PlaybackState.ACTION_PLAY_PAUSE));
+
+        Notification.Action restartAction = new Notification
+                .Action(R.drawable.exo_controls_previous, getString(R.string.restart),
+                MediaButtonReceiver.buildMediaButtonPendingIntent
+                        (this, PlaybackState.ACTION_SKIP_TO_PREVIOUS));
+
+        PendingIntent contentPendingIntent = PendingIntent.getActivity
+                (this, 0, new Intent(this, QuizActivity.class), 0);
+
+        Notification mediaNotification = new Notification.Builder(this)
+                .setContentTitle(getString(R.string.guess))
+                .setContentText(getString(R.string.notification_text))
+                .setContentIntent(contentPendingIntent)
+                .setSmallIcon(R.drawable.question_mark)
+                .setVisibility(Notification.VISIBILITY_PUBLIC)
+                .addAction(restartAction)
+                .addAction(playPauseAction)
+                .setStyle(new Notification.MediaStyle()
+                        .setMediaSession(mMediaSession.getSessionToken())
+                        .setShowActionsInCompactView(0,1)).build();
+
+        mNotificationManager = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
+        mNotificationManager.notify(0, mediaNotification);
+    }
 
     /**
      * Initialize ExoPlayer.
@@ -336,15 +385,23 @@ public class QuizActivity extends AppCompatActivity implements View.OnClickListe
     @Override
     public void onPlayerStateChanged(boolean playWhenReady, int playbackState) {
         if((playbackState == ExoPlayer.STATE_READY) && playWhenReady){
-            mStateBuilder.setState(PlaybackStateCompat.STATE_PLAYING,
+            mStateBuilder.setState(PlaybackState.STATE_PLAYING,
                     mExoPlayer.getCurrentPosition(), 1f);
         } else if((playbackState == ExoPlayer.STATE_READY)){
-            mStateBuilder.setState(PlaybackStateCompat.STATE_PAUSED,
+            mStateBuilder.setState(PlaybackState.STATE_PAUSED,
                     mExoPlayer.getCurrentPosition(), 1f);
         }
-        mMediaSession.setPlaybackState(mStateBuilder.build());
+        PlaybackState state = mStateBuilder.build();
+
+        mMediaSession.setPlaybackState(state);
         
-        // TODO (2): Call the method to show the notification, passing in the PlayBackStateCompat object.
+        // COMPLETED (2): Call the method to show the notification, passing in the PlayBackStateCompat object.
+        showNotification(state);
+    }
+
+    @Override
+    public void onRepeatModeChanged(int repeatMode) {
+
     }
 
     @Override
@@ -355,10 +412,15 @@ public class QuizActivity extends AppCompatActivity implements View.OnClickListe
     public void onPositionDiscontinuity() {
     }
 
+    @Override
+    public void onPlaybackParametersChanged(PlaybackParameters playbackParameters) {
+
+    }
+
     /**
      * Media Session Callbacks, where all external clients control the player.
      */
-    private class MySessionCallback extends MediaSessionCompat.Callback {
+    private class MySessionCallback extends MediaSession.Callback {
         @Override
         public void onPlay() {
             mExoPlayer.setPlayWhenReady(true);
